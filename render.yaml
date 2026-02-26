@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: cruise-price-scraper
+    env: node
+    rootDir: scraper
+    buildCommand: npm install
+    startCommand: node server.js
+    plan: free
+    envVars:
+      - key: PORT
+        value: 3001

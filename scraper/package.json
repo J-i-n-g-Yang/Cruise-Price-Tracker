@@ -1,0 +1,15 @@
+{
+  "name": "royal-caribbean-scraper",
+  "version": "1.0.0",
+  "description": "Backend scraper proxy for Royal Caribbean price tracker",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "scrape": "node scrape.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "puppeteer": "^21.0.0"
+  }
+}
