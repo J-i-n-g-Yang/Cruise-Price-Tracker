@@ -34,7 +34,7 @@ function parseCheckoutUrl(rawUrl) {
 
   const shipCode = (p.get('shipCode') || '').toUpperCase();
   const sailDate = p.get('sailDate') || '';
-  const cabinClassRaw = (p.get('cabinClassType') || p.get('r0d') || '').toUpperCase();
+  const cabinClassRaw = (p.get('r0d') || p.get('cabinClassType') || '').toUpperCase();
   const adults = parseInt(p.get('r0a') || '2');
   const currency = p.get('selectedCurrencyCode') || 'USD';
   const stateroomType = CABIN_TYPE_MAP[cabinClassRaw] || 'interior';
