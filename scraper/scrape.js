@@ -19,9 +19,13 @@ const SHIP_NAMES = {
 };
 
 const CABIN_TYPE_MAP = {
-  INTERIOR:'interior',INSIDE:'interior',OUTSIDE:'oceanview',OCEANVIEW:'oceanview',
-  OCEAN_VIEW:'oceanview',BALCONY:'balcony',DELUXE:'balcony',
-  SUITE:'suite',GRAND_SUITE:'suite',SKY_SUITE:'suite',
+  INTERIOR: 'interior',
+  OCEANVIEW: 'oceanview',
+  BALCONY: 'balcony',
+  SUITE: 'suite',
+  INSIDE: 'interior',
+  OUTSIDE: 'oceanview',
+  JUNIOR_SUITE: 'suite',
 };
 
 function parseCheckoutUrl(rawUrl) {
