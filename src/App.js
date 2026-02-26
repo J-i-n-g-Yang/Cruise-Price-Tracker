@@ -360,7 +360,7 @@ export default function App() {
         const name = ship && friendlyDate ? `${ship} — ${friendlyDate}` : null;
         const prices = {};
         if (totalPrice && stateroomType) prices[stateroomType] = totalPrice;
-        return { name, ship, departureDate, duration, stateroomType, pricePerPerson, totalPrice, adults, prices };
+        return { name, ship, departureDate, duration, stateroomType, totalPrice, adults, prices };
       } catch { return null; }
     };
 
