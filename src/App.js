@@ -337,7 +337,7 @@ export default function App() {
         const p = u.searchParams;
         const shipCode = (p.get('shipCode') || '').toUpperCase();
         const sailDate = p.get('sailDate') || '';
-        const cabinRaw = (p.get('cabinClassType') || p.get('r0d') || '').toUpperCase();
+        const cabinRaw = (p.get('r0d') || p.get('cabinClassType') || '').toUpperCase().trim();
         const adults = parseInt(p.get('r0a') || '2');
         const stateroomType = CABIN_MAP[cabinRaw] || null;
         const ship = SHIP_NAMES[shipCode] || shipCode || null;
