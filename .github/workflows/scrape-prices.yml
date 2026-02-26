@@ -1,0 +1,49 @@
+name: Scrape Royal Caribbean Prices
+
+on:
+  schedule:
+    - cron: '0 6,12,18 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install Puppeteer system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+            libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 \
+            libxfixes3 libxrandr2 libgbm1 libasound2
+
+      - name: Install scraper packages
+        run: |
+          cd scraper
+          npm install
+
+      - name: Run scraper
+        env:
+          CRUISE_URLS: ${{ secrets.CRUISE_URLS }}
+        run: |
+          cd scraper
+          node scrape.js
+
+      - name: Commit updated prices
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add public/data/prices.json
+          git diff --staged --quiet || git commit -m "🚢 Auto-update prices $(date -u '+%Y-%m-%d %H:%M UTC')"
+          git push
