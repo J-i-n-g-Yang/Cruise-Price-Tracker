@@ -2,7 +2,7 @@
   "name": "royal-caribbean-price-tracker",
   "version": "1.0.0",
   "description": "Track Royal Caribbean cruise prices across different stateroom categories",
-  "homepage": "https://J-i-n-g-Yang.github.io/Cruise-Price-Tracker2",
+  "homepage": "https://J-i-n-g-Yang.github.io/Cruise-Price-Tracker",
   "private": true,
   "dependencies": {
     "react": "^18.2.0",
