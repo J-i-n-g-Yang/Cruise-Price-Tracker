@@ -342,8 +342,7 @@ export default function App() {
         const adults = parseInt(p.get('r0a') || '2');
         const stateroomType = CABIN_MAP[cabinRaw] || null;
         const ship = SHIP_NAMES[shipCode] || shipCode || null;
-        const pricePerPerson = p.get('r0j') ? parseFloat(p.get('r0j')) : null;
-        const totalPrice = pricePerPerson ? Math.round(pricePerPerson * adults * 100) / 100 : null;
+        const totalPrice = p.get('r0A') ? parseFloat(p.get('r0A')) : null;
         let departureDate = sailDate;
         let friendlyDate = '';
         if (sailDate) {
@@ -369,7 +368,7 @@ export default function App() {
       if (!url || !url.includes('royalcaribbean.com')) return;
       setUrlLoading(true);
       setUrlStatus('');
-      const isCheckoutUrl = url.includes('/checkout/guest-info');
+      const isCheckoutUrl = url.includes('/checkout/');
       try {
         if (isCheckoutUrl) {
           const parsed = parseCheckoutUrl(url);
