@@ -27,18 +27,15 @@ const CABIN_TYPE_MAP = {
 function parseCheckoutUrl(rawUrl) {
   const url = new URL(rawUrl);
   const p = url.searchParams;
-
   const shipCode = (p.get('shipCode') || '').toUpperCase();
   const sailDate = p.get('sailDate') || '';
   const cabinClassRaw = (p.get('cabinClassType') || p.get('r0d') || '').toUpperCase();
   const adults = parseInt(p.get('r0a') || '2');
   const stateroomType = CABIN_TYPE_MAP[cabinClassRaw] || 'interior';
   const ship = SHIP_NAMES[shipCode] || shipCode;
-
   const priceRaw = p.get('r0j');
   const pricePerPerson = priceRaw ? parseFloat(priceRaw) : null;
   const totalPrice = pricePerPerson ? Math.round(pricePerPerson * adults * 100) / 100 : null;
-
   let departureDate = sailDate;
   let name = null;
   if (sailDate) {
@@ -48,16 +45,13 @@ function parseCheckoutUrl(rawUrl) {
       name = `${ship} — ${d.toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' })}`;
     }
   }
-
   let duration = null;
   const pkgMatch = (p.get('packageCode') || '').match(/[A-Z]{2}(\d+)[A-Z]/);
   if (pkgMatch) duration = pkgMatch[1];
   const r0fMatch = (p.get('r0f') || '').match(/^(\d+)N$/i);
   if (!duration && r0fMatch) duration = r0fMatch[1];
-
   const prices = {};
   if (totalPrice) prices[stateroomType] = totalPrice;
-
   return { name, ship, shipCode, departureDate, duration: duration?.toString() || null, stateroomType, pricePerPerson, totalPrice, adults, prices };
 }
 
@@ -84,20 +78,16 @@ function fetchUrl(url, redirectCount = 0) {
 
 async function processCruise(cruise) {
   console.log(`\nProcessing: ${cruise.label || cruise.url}`);
-
   if (!cruise.url.includes('/checkout/guest-info')) {
     console.log('  ⚠️  Not a checkout URL — skipping');
     return { success: false, error: 'Not a checkout URL' };
   }
-
   const parsed = parseCheckoutUrl(cruise.url);
   console.log(`  Ship: ${parsed.ship}, Date: ${parsed.departureDate}, Type: ${parsed.stateroomType}`);
-
   if (parsed.totalPrice) {
     console.log(`  ✅ Price from URL: $${parsed.totalPrice} (${parsed.adults} guests)`);
     return { success: true, data: parsed };
   }
-
   console.log('  No price in URL params, fetching live page...');
   try {
     const body = await fetchUrl(cruise.url);
@@ -135,12 +125,10 @@ async function main() {
     console.error('❌ Invalid CRUISE_URLS — must be a JSON array');
     process.exit(1);
   }
-
   if (cruiseList.length === 0) {
     console.log('No cruise URLs configured.');
     process.exit(0);
   }
-
   let existing = {};
   try {
     if (fs.existsSync(OUTPUT_FILE)) {
@@ -149,15 +137,12 @@ async function main() {
       }
     }
   } catch {}
-
   const results = [];
   const timestamp = new Date().toISOString();
-
   for (const cruise of cruiseList) {
     const result = await processCruise(cruise);
     const prev = existing[cruise.id] || { history: [] };
     const history = [...(prev.history || [])];
-
     if (result.success && Object.keys(result.data.prices).length > 0) {
       history.push({ timestamp, prices: result.data.prices });
       results.push({ id: cruise.id, label: cruise.label, url: cruise.url, lastScraped: timestamp, ...result.data, history });
@@ -165,7 +150,6 @@ async function main() {
       results.push({ ...(prev || {}), id: cruise.id, label: cruise.label, url: cruise.url, lastAttempt: timestamp, lastError: result.error || 'No price found', history });
     }
   }
-
   fs.mkdirSync(path.dirname(OUTPUT_FILE), { recursive: true });
   fs.writeFileSync(OUTPUT_FILE, JSON.stringify(results, null, 2));
   console.log(`\n✅ Wrote ${results.length} cruise(s) to ${OUTPUT_FILE}`);
