@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Ship, TrendingDown, TrendingUp, Plus, Trash2, Edit2, Save, X,
-  DollarSign, Calendar, MapPin, Anchor, Bell, RefreshCw,
+  Calendar, MapPin, Anchor, Bell, RefreshCw,
   ChevronDown, ChevronUp, Download, Upload, BarChart3, Link2,
-  Zap, Clock, AlertCircle, CheckCircle, Eye, EyeOff,
+  Zap, Clock, CheckCircle, Eye,
 } from "lucide-react";
 
 const STORAGE_KEY = "cruise-tracker-v3";
@@ -100,8 +100,7 @@ export default function App() {
   const [showForm, setShowForm]   = useState(false);
   const [editing, setEditing]     = useState(null);
   const [expanded, setExpanded]   = useState(null);
-  const [activeTab, setActiveTab] = useState("watchlist");
-  const [addPriceModal, setAddPriceModal] = useState(null); // {cruiseId, type}
+
 
   useEffect(() => {
     try {
