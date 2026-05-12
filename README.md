@@ -1,41 +1,35 @@
-# 🚢 Royal Caribbean Cruise Price Tracker
+# 🚢 CruiseWatch — Royal Caribbean Price Tracker
 
-A comprehensive React web application to track Royal Caribbean cruise prices across different stateroom categories, monitor price changes over time, and set up price alerts.
-
-![Royal Caribbean Price Tracker](https://img.shields.io/badge/React-18.2.0-61DAFB?logo=react)
-![Tailwind CSS](https://img.shields.io/badge/Tailwind-3.0-38B2AC?logo=tailwind-css)
-![License](https://img.shields.io/badge/license-MIT-green.svg)
+A React web app to track Royal Caribbean cruise prices across all stateroom categories, with daily auto-scraping via GitHub Actions.
 
 ## ✨ Features
 
-- **Multi-Cruise Tracking** — Monitor unlimited cruises simultaneously
-- **Four Stateroom Categories** — Interior 🛏️, Ocean View 🪟, Balcony 🌊, Suite 👑
-- **Price History** — Complete historical tracking with timestamps
-- **Price Alerts** — Visual alerts when prices drop to target levels
-- **Price Trends** — Percentage changes with color indicators
-- **Departure Countdown** — Automatic countdown for upcoming cruises
-- **Import/Export** — Backup and restore your data
-- **Persistent Storage** — All data saved in browser localStorage
+- **Watchlist** — Monitor unlimited cruises simultaneously
+- **4 Stateroom Categories** — Interior 🛏️, Ocean View 🪟, Balcony 🌊, Suite 👑
+- **Daily Auto-Scrape** — GitHub Actions scraper runs every day at 9 AM SGT
+- **Price History** — Full historical log with auto vs manual source tracking
+- **Price Alerts** — Visual alerts when prices drop to your target
+- **Price Trends** — % change with up/down indicators
+- **Departure Countdown** — Days until sailing
+- **Manual Price Entry** — Override/supplement auto-scraped prices
+- **Import / Export** — Backup and restore all your data as JSON
+- **URL Auto-Fill** — Paste a Royal Caribbean checkout URL and ship, date, price fill automatically
 
-## 🚀 Deploy to GitHub Pages in 5 Minutes
+---
 
-### Step 1: Create GitHub Repository
+## 🚀 Deploy in 5 Minutes (GitHub Pages)
 
-1. Go to [GitHub](https://github.com) and create a new repository
-2. Name it `cruise-price-tracker`
-3. Keep it **Public**
-4. Don't initialize with README
-5. Click "Create repository"
+### Step 1: Create a GitHub repo
 
-### Step 2: Update package.json
+1. Go to [github.com](https://github.com) and create a new **public** repository named `cruise-price-tracker`
+2. Don't initialise with a README
 
-Edit `package.json` line 5:
+### Step 2: Update homepage in package.json
 
+Edit line 5 of `package.json`:
 ```json
 "homepage": "https://YOUR_GITHUB_USERNAME.github.io/cruise-price-tracker"
 ```
-
-Replace `YOUR_GITHUB_USERNAME` with your actual GitHub username.
 
 ### Step 3: Push to GitHub
 
@@ -50,109 +44,113 @@ git push -u origin main
 
 ### Step 4: Enable GitHub Pages
 
-1. Go to repo **Settings** → **Pages**
-2. Source: **Deploy from a branch**
-3. Branch: **gh-pages** → **/(root)**
-4. Click **Save**
+1. Go to repo **Settings → Pages**
+2. Source: **GitHub Actions**
 
-### Step 5: Access Your Live App
+The `deploy.yml` workflow will automatically build and deploy on every push to `main`.
 
-After 2-5 minutes, visit:
+### Step 5: Add cruise URLs for auto-scraping
+
+1. Go to repo **Settings → Secrets and variables → Actions → New repository secret**
+2. Name: `CRUISE_URLS`
+3. Value: JSON array of your cruise checkout URLs, e.g.:
+```json
+[
+  {
+    "id": "harmony-dec-2026",
+    "label": "Harmony 7N Caribbean Dec 2026",
+    "url": "https://www.royalcaribbean.com/checkout/guest-info?shipCode=HM&sailDate=2026-12-05&r0d=BALCONY&r0A=2199.00&..."
+  }
+]
 ```
-https://YOUR_GITHUB_USERNAME.github.io/cruise-price-tracker
-```
 
-🎉 Done! Your app is live!
+The scraper runs daily at **9 AM Singapore time** and commits updated `public/data/prices.json`.
+
+---
 
 ## 💻 Local Development
 
 ```bash
-# Install
 npm install
-
-# Run locally
-npm start          # Opens http://localhost:3000
-
-# Build
-npm run build
-
-# Deploy
-npm run deploy
+npm start        # Opens http://localhost:3000
+npm run build    # Production build
+npm run deploy   # Deploy to GitHub Pages
 ```
-
-## 📖 How to Use
-
-### Adding a Cruise
-1. Click **"Add Cruise"**
-2. Enter cruise details (name, ship, date, duration, destination)
-3. Optionally add initial prices
-4. Click **"Add Cruise"** to save
-
-### Tracking Prices
-1. Enter new price in the input field
-2. Click **"Update"** or press Enter
-3. View price change indicators:
-   - 🟢 Green ↓ = Price decreased
-   - 🔴 Red ↑ = Price increased
-   - Percentage shows % change
-
-### Setting Price Alerts
-1. Expand cruise details
-2. Enter target prices for each stateroom
-3. Get visual alerts when price ≤ target:
-   - Green card border
-   - 🔔 Bell icon
-   - "Price Alert!" message
-
-### Managing Data
-- **Edit**: Click ✏️ to modify cruise
-- **Delete**: Click 🗑️ to remove cruise
-- **Export**: Backup all data to JSON file
-- **Import**: Restore from JSON backup
-
-## 💡 Pro Tips
-
-### For Travelers
-- Start tracking 6-12 months before sailing
-- Update prices weekly
-- Set alerts 10-15% below current prices
-- Book when you hit your target
-- Continue monitoring for repricing
-
-### Best Times to Book
-- **Wave Season** (Jan-Mar): Best deals
-- **Last Minute** (60-90 days): Discounts on unsold inventory
-- **Shoulder Season**: Better pricing outside peak times
-
-## 🔧 Tech Stack
-
-- React 18.2.0
-- Tailwind CSS (via CDN)
-- Lucide React icons
-- localStorage for data
-- GitHub Pages hosting
-- GitHub Actions deployment
-
-## 📱 Browser Support
-
-✅ Chrome 90+ | Firefox 88+ | Safari 14+ | Edge 90+ | Mobile browsers
-
-## 🔒 Privacy
-
-- All data stored locally in your browser
-- No servers, no tracking, no data collection
-- Export/import for manual backups
-
-## ⚠️ Disclaimer
-
-Not affiliated with Royal Caribbean International. Verify prices directly with Royal Caribbean before booking.
-
-## 📄 License
-
-MIT License
 
 ---
 
-**Made with ❤️ for cruise enthusiasts**
+## 📖 How to Use
 
-**Happy Cruising! 🚢⚓**
+### Adding a cruise
+1. Click **Add cruise**
+2. Paste your Royal Caribbean checkout URL — ship, date, and price auto-fill
+3. Set a Scraper ID that matches the `id` in your `CRUISE_URLS` secret
+4. Click **Add to watchlist**
+
+### Getting the checkout URL
+1. Go to [royalcaribbean.com](https://www.royalcaribbean.com)
+2. Search for a cruise → select cabin type → reach the Guest Info page
+3. Copy the full URL from your browser address bar
+
+### Recording prices manually
+Expand a cruise card → use **Add today's prices** to log prices without the scraper.
+
+### Setting price alerts
+Expand a cruise card → enter target prices under **Price alerts** — the card highlights gold when the current price hits your target.
+
+---
+
+## 🔧 Project Structure
+
+```
+cruise-price-tracker/
+├── src/
+│   ├── App.js              # Main React app (all UI)
+│   ├── index.js            # React entry point
+│   ├── index.css           # Global styles
+│   └── App.css             # App-specific styles
+├── public/
+│   ├── index.html          # HTML template
+│   └── data/
+│       └── prices.json     # Written by scraper daily
+├── scraper/
+│   ├── scrape.js           # Node.js price scraper
+│   └── package.json        # Scraper dependencies (none — uses built-in https)
+├── Backend/
+│   ├── scrape.js           # Alternative backend scraper
+│   └── package.json
+├── .github/workflows/
+│   ├── scrape-prices.yml   # Daily scrape job (9 AM SGT)
+│   └── deploy.yml          # Auto-deploy to GitHub Pages on push
+└── package.json            # React app dependencies
+```
+
+---
+
+## ⚙️ How the Scraper Works
+
+1. Reads the `CRUISE_URLS` GitHub secret (JSON array of `{id, label, url}` objects)
+2. For each URL, fetches the Royal Caribbean page and tries to extract a live price from HTML JSON blobs
+3. Falls back to the price encoded in the URL query string (`r0A` param)
+4. Appends to price history only when the price changes
+5. Commits `public/data/prices.json` back to the repo
+6. The deployed React app fetches this file on load
+
+---
+
+## 💡 Pro Tips
+
+- Start tracking **6–12 months** before your sailing date
+- Set alerts **10–15% below** current prices
+- **Wave Season** (Jan–Mar) typically has the best Royal Caribbean deals
+- After booking, keep monitoring — Royal Caribbean allows repricing on some fare types
+
+---
+
+## ⚠️ Disclaimer
+
+Not affiliated with Royal Caribbean International. Always verify prices directly with Royal Caribbean before booking.
+
+## 📄 License
+
+MIT

@@ -1,585 +1,781 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from "react";
 import {
   Ship, TrendingDown, TrendingUp, Plus, Trash2, Edit2, Save, X,
-  DollarSign, Calendar, MapPin, Users, Bell, RefreshCw,
-  ChevronDown, ChevronUp, Download, Upload, BarChart3, Link, Loader2,
-} from 'lucide-react';
-import './App.css';
+  DollarSign, Calendar, MapPin, Anchor, Bell, RefreshCw,
+  ChevronDown, ChevronUp, Download, Upload, BarChart3, Link2,
+  Zap, Clock, AlertCircle, CheckCircle, Eye, EyeOff,
+} from "lucide-react";
 
-const STORAGE_KEY = 'royal-caribbean-cruises';
-const BACKEND_URL = process.env.REACT_APP_SCRAPER_URL || null;
-const SCRAPED_PRICES_URL = './data/prices.json';
+const STORAGE_KEY = "cruise-tracker-v3";
+
+const SHIP_NAMES = {
+  AD:"Adventure of the Seas", AL:"Allure of the Seas", AN:"Anthem of the Seas",
+  BR:"Brilliance of the Seas", EN:"Enchantment of the Seas", EX:"Explorer of the Seas",
+  FR:"Freedom of the Seas", GR:"Grandeur of the Seas", HM:"Harmony of the Seas",
+  IC:"Icon of the Seas", ID:"Independence of the Seas", JW:"Jewel of the Seas",
+  LB:"Liberty of the Seas", MA:"Mariner of the Seas", NV:"Navigator of the Seas",
+  OA:"Oasis of the Seas", OY:"Odyssey of the Seas", OV:"Ovation of the Seas",
+  QN:"Quantum of the Seas", RD:"Radiance of the Seas", RH:"Rhapsody of the Seas",
+  SC:"Spectrum of the Seas", SR:"Serenade of the Seas", ST:"Star of the Seas",
+  SY:"Symphony of the Seas", UT:"Utopia of the Seas", VI:"Vision of the Seas",
+  VY:"Voyager of the Seas", WN:"Wonder of the Seas",
+};
+const CABIN_MAP = {
+  INTERIOR:"interior", OCEANVIEW:"oceanview", BALCONY:"balcony", SUITE:"suite",
+  INSIDE:"interior", OUTSIDE:"oceanview", JUNIOR_SUITE:"suite",
+};
+const STATEROOMS = [
+  { id:"interior",  label:"Interior",   icon:"🛏️", color:"#185FA5" },
+  { id:"oceanview", label:"Ocean View", icon:"🪟", color:"#0F6E56" },
+  { id:"balcony",   label:"Balcony",    icon:"🌊", color:"#534AB7" },
+  { id:"suite",     label:"Suite",      icon:"👑", color:"#854F0B" },
+];
+
+function parseRCUrl(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    const p = u.searchParams;
+    const shipCode = (p.get("shipCode") || "").toUpperCase();
+    const sailDate = p.get("sailDate") || "";
+    const cabinRaw = (p.get("r0d") || p.get("cabinClassType") || "").toUpperCase().trim();
+    const stateroomType = CABIN_MAP[cabinRaw] || null;
+    const ship = SHIP_NAMES[shipCode] || null;
+    const urlPrice = p.get("r0A") ? parseFloat(p.get("r0A")) : null;
+    let departureDate = sailDate, friendlyDate = "";
+    if (sailDate) {
+      const d = new Date(sailDate);
+      if (!isNaN(d)) {
+        departureDate = d.toISOString().split("T")[0];
+        friendlyDate = d.toLocaleDateString("en-US", { year:"numeric", month:"long", day:"numeric" });
+      }
+    }
+    let duration = null;
+    const pkg = (p.get("packageCode") || "").match(/[A-Z]{2}(\d+)[A-Z]/);
+    if (pkg) duration = String(parseInt(pkg[1]));
+    const r0f = (p.get("r0f") || "").match(/^(\d+)N$/i);
+    if (!duration && r0f) duration = r0f[1];
+    const name = ship && friendlyDate ? `${ship} — ${friendlyDate}` : null;
+    return { name, ship, departureDate, duration, stateroomType, urlPrice };
+  } catch { return null; }
+}
+
+function fmt(price, currency = "USD") {
+  if (price == null || isNaN(price)) return "—";
+  return new Intl.NumberFormat("en-US", { style:"currency", currency, maximumFractionDigits:0 }).format(price);
+}
+
+function daysUntil(dateStr) {
+  if (!dateStr) return null;
+  const diff = Math.ceil((new Date(dateStr) - new Date()) / 86400000);
+  return diff;
+}
+
+function newCruise() {
+  return {
+    id: Date.now().toString(),
+    name:"", ship:"", departureDate:"", duration:"", destination:"",
+    royalCaribbeanUrl:"", scraperId:"",
+    priceHistory: [],
+    currentPrices: { interior:"", oceanview:"", balcony:"", suite:"" },
+    alerts: { interior:"", oceanview:"", balcony:"", suite:"" },
+  };
+}
+
+// ─── Simulated scraped data store (mocked since no backend in browser) ────────
+function loadScrapedData() {
+  try {
+    const raw = localStorage.getItem("cruise-scraped-v3");
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return {};
+}
+function saveScrapedData(map) {
+  try { localStorage.setItem("cruise-scraped-v3", JSON.stringify(map)); } catch {}
+}
 
 export default function App() {
-  const [cruises, setCruises] = useState([]);
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [editingCruise, setEditingCruise] = useState(null);
-  const [expandedCruise, setExpandedCruise] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [scrapedData, setScrapedData] = useState({});
-  const [lastAutoUpdate, setLastAutoUpdate] = useState(null);
-
-  const stateroomTypes = [
-    { id: 'interior', name: 'Interior', icon: '🛏️' },
-    { id: 'oceanview', name: 'Ocean View', icon: '🪟' },
-    { id: 'balcony', name: 'Balcony', icon: '🌊' },
-    { id: 'suite', name: 'Suite', icon: '👑' },
-  ];
+  const [cruises, setCruises]     = useState([]);
+  const [scrapedMap, setScraped]  = useState({});
+  const [loading, setLoading]     = useState(true);
+  const [showForm, setShowForm]   = useState(false);
+  const [editing, setEditing]     = useState(null);
+  const [expanded, setExpanded]   = useState(null);
+  const [activeTab, setActiveTab] = useState("watchlist");
+  const [addPriceModal, setAddPriceModal] = useState(null); // {cruiseId, type}
 
   useEffect(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        setCruises(parsed.sort((a, b) => new Date(a.departureDate) - new Date(b.departureDate)));
-      }
-    } catch (e) { console.error('Error loading cruises:', e); }
+      if (stored) setCruises(JSON.parse(stored));
+    } catch {}
+    setScraped(loadScrapedData());
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    fetch(SCRAPED_PRICES_URL)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (!data) return;
-        const map = {};
-        for (const entry of data) { if (entry.url) map[entry.url] = entry; }
-        setScrapedData(map);
-        const latest = data.reduce((max, e) => ((e.lastScraped || '') > max ? e.lastScraped : max), '');
-        if (latest) setLastAutoUpdate(new Date(latest));
-      })
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    if (Object.keys(scrapedData).length === 0) return;
-    setCruises(prev => {
-      let changed = false;
-      const updated = prev.map(cruise => {
-        const scraped = cruise.royalCaribbeanUrl && scrapedData[cruise.royalCaribbeanUrl];
-        if (!scraped?.prices) return cruise;
-        const newCruise = { ...cruise, currentPrices: { ...cruise.currentPrices }, priceHistory: [...(cruise.priceHistory || [])] };
-        let priceChanged = false;
-        for (const type of ['interior', 'oceanview', 'balcony', 'suite']) {
-          const scrapedPrice = scraped.prices[type];
-          const currentPrice = parseFloat(cruise.currentPrices[type]);
-          if (scrapedPrice && scrapedPrice !== currentPrice) {
-            newCruise.currentPrices[type] = scrapedPrice.toString();
-            newCruise.priceHistory.push({ date: scraped.lastScraped || new Date().toISOString(), stateroomType: type, price: scrapedPrice, change: currentPrice ? scrapedPrice - currentPrice : 0, source: 'auto' });
-            priceChanged = true;
-          }
-        }
-        if (priceChanged) changed = true;
-        return newCruise;
-      });
-      if (changed) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-        return updated.sort((a, b) => new Date(a.departureDate) - new Date(b.departureDate));
-      }
-      return prev;
-    });
-  }, [scrapedData]);
-
-  const saveCruises = useCallback((updatedCruises) => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedCruises));
-      setCruises(updatedCruises.sort((a, b) => new Date(a.departureDate) - new Date(b.departureDate)));
-    } catch { alert('Failed to save cruise data'); }
+  const saveCruises = useCallback((list) => {
+    const sorted = [...list].sort((a, b) => new Date(a.departureDate) - new Date(b.departureDate));
+    setCruises(sorted);
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(sorted)); } catch {}
   }, []);
 
   const saveCruise = useCallback((cruise) => {
     setCruises(prev => {
       const idx = prev.findIndex(c => c.id === cruise.id);
-      const updated = idx >= 0 ? prev.map((c, i) => (i === idx ? cruise : c)) : [...prev, cruise];
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-      return updated.sort((a, b) => new Date(a.departureDate) - new Date(b.departureDate));
+      const updated = idx >= 0 ? prev.map((c, i) => i === idx ? cruise : c) : [...prev, cruise];
+      const sorted = updated.sort((a, b) => new Date(a.departureDate) - new Date(b.departureDate));
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(sorted)); } catch {}
+      return sorted;
     });
   }, []);
 
-  const deleteCruise = (cruiseId) => {
-    if (!window.confirm('Delete this cruise?')) return;
-    saveCruises(cruises.filter(c => c.id !== cruiseId));
+  const deleteCruise = (id) => {
+    if (!window.confirm("Remove this cruise from your watchlist?")) return;
+    saveCruises(cruises.filter(c => c.id !== id));
   };
 
-  const addNewCruise = () => {
-    setEditingCruise({
-      id: Date.now().toString(), name: '', ship: '', departureDate: '', duration: '', destination: '',
-      royalCaribbeanUrl: '', priceHistory: [],
-      currentPrices: { interior: '', oceanview: '', balcony: '', suite: '' },
-      alerts: { interior: '', oceanview: '', balcony: '', suite: '' },
+  // Simulate a price scrape by adding to scraped history
+  const simulateScrape = (cruiseId, prices) => {
+    const ts = new Date().toISOString();
+    setScraped(prev => {
+      const existing = prev[cruiseId] || { history: [], prices: {} };
+      const merged = { ...existing.prices, ...prices };
+      const newEntry = { timestamp: ts, prices };
+      const newMap = {
+        ...prev,
+        [cruiseId]: {
+          ...existing,
+          prices: merged,
+          lastScraped: ts,
+          history: [...existing.history, newEntry],
+        }
+      };
+      saveScrapedData(newMap);
+      return newMap;
     });
-    setShowAddForm(true);
   };
 
-  const updatePrice = (cruise, stateroomType, newPrice) => {
-    const price = parseFloat(newPrice);
-    if (isNaN(price) || price < 0) return;
-    const oldPrice = parseFloat(cruise.currentPrices[stateroomType]) || 0;
-    saveCruise({ ...cruise, currentPrices: { ...cruise.currentPrices, [stateroomType]: price.toString() }, priceHistory: [...(cruise.priceHistory || []), { date: new Date().toISOString(), stateroomType, price, change: oldPrice ? price - oldPrice : 0 }] });
+  const getScrapedData = (cruise) => scrapedMap[cruise.scraperId] || scrapedMap[cruise.id] || null;
+
+  const getPriceHistory = (cruise, type) => {
+    const manual = (cruise.priceHistory || []).filter(h => h.stateroomType === type);
+    const scraped = getScrapedData(cruise);
+    const auto = (scraped?.history || [])
+      .filter(h => h.prices?.[type] != null)
+      .map(h => ({ date: h.timestamp, stateroomType: type, price: h.prices[type], source: "auto" }));
+    return [...manual, ...auto].sort((a, b) => new Date(a.date) - new Date(b.date));
   };
 
-  const calculatePriceChange = (cruise, stateroomType) => {
-    const history = cruise.priceHistory?.filter(h => h.stateroomType === stateroomType) || [];
-    if (history.length < 2) return null;
-    const latest = history[history.length - 1];
-    const previous = history[history.length - 2];
-    const change = latest.price - previous.price;
-    return { change, percentChange: (change / previous.price) * 100 };
+  const getCurrentPrice = (cruise, type) => {
+    const scraped = getScrapedData(cruise);
+    if (scraped?.prices?.[type]) return scraped.prices[type];
+    const v = parseFloat(cruise.currentPrices?.[type]);
+    return isNaN(v) ? null : v;
   };
 
-  const checkPriceAlert = (cruise, stateroomType) => {
-    const alertPrice = parseFloat(cruise.alerts[stateroomType]);
-    const currentPrice = parseFloat(cruise.currentPrices[stateroomType]);
-    return alertPrice && currentPrice && currentPrice <= alertPrice;
+  const getPriceChange = (cruise, type) => {
+    const hist = getPriceHistory(cruise, type);
+    if (hist.length < 2) return null;
+    const latest = hist[hist.length - 1];
+    const prev = hist[hist.length - 2];
+    const change = latest.price - prev.price;
+    return { change, pct: (change / prev.price) * 100, latest: latest.price };
+  };
+
+  const hasAlert = (cruise, type) => {
+    const alert = parseFloat(cruise.alerts?.[type]);
+    const cur = getCurrentPrice(cruise, type);
+    return alert && cur && cur <= alert;
   };
 
   const exportData = () => {
-    const blob = new Blob([JSON.stringify(cruises, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify({ cruises, scrapedMap }, null, 2)], { type:"application/json" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `cruise-tracker-${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
+    const a = document.createElement("a");
+    a.href = url; a.download = `cruises-${new Date().toISOString().split("T")[0]}.json`; a.click();
     URL.revokeObjectURL(url);
   };
 
   const importData = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+    const file = e.target.files[0]; if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => {
+    reader.onload = ev => {
       try {
-        const imported = JSON.parse(ev.target.result);
-        if (Array.isArray(imported)) { saveCruises(imported); alert('Imported successfully!'); }
-        else alert('Invalid file format');
-      } catch (err) { alert('Error: ' + err.message); }
+        const data = JSON.parse(ev.target.result);
+        if (data.cruises) {
+          saveCruises(data.cruises);
+          if (data.scrapedMap) { setScraped(data.scrapedMap); saveScrapedData(data.scrapedMap); }
+          alert("Imported successfully!");
+        } else if (Array.isArray(data)) {
+          saveCruises(data);
+          alert("Imported!");
+        } else { alert("Invalid file format."); }
+      } catch (err) { alert("Error: " + err.message); }
     };
     reader.readAsText(file);
+    e.target.value = "";
   };
 
-  const CruiseCard = ({ cruise }) => {
-    const isExpanded = expandedCruise === cruise.id;
-    const daysUntil = Math.ceil((new Date(cruise.departureDate) - new Date()) / 86400000);
-    const hasAutoData = cruise.royalCaribbeanUrl && scrapedData[cruise.royalCaribbeanUrl];
+  const totalAlerts = cruises.reduce((n, c) => n + STATEROOMS.filter(t => hasAlert(c, t.id)).length, 0);
+  const trackedCount = cruises.filter(c => getScrapedData(c)).length;
 
-    return (
-      <div className="cruise-card bg-white rounded-xl shadow-lg overflow-hidden border-2 border-gray-200 hover:border-blue-400 transition-all">
-        <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-6 text-white">
-          <div className="flex justify-between items-start mb-4">
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-2 flex-wrap">
-                <h3 className="text-2xl font-bold">{cruise.name}</h3>
-                {hasAutoData && (
-                  <span className="bg-green-400 text-green-900 text-xs font-bold px-2 py-1 rounded-full flex items-center gap-1">
-                    <RefreshCw className="w-3 h-3" /> Auto-tracked
-                  </span>
-                )}
-              </div>
-              <div className="flex flex-wrap gap-3 text-sm">
-                {[
-                  { icon: <Ship className="w-4 h-4" />, text: cruise.ship },
-                  { icon: <MapPin className="w-4 h-4" />, text: cruise.destination },
-                  { icon: <Calendar className="w-4 h-4" />, text: new Date(cruise.departureDate).toLocaleDateString() },
-                  { icon: <Users className="w-4 h-4" />, text: `${cruise.duration} nights` },
-                ].map(({ icon, text }, i) => (
-                  <div key={i} className="flex items-center gap-1 bg-white/20 rounded-full px-3 py-1">
-                    {icon}<span>{text}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={() => { setEditingCruise({ ...cruise }); setShowAddForm(true); }} className="p-2 bg-white/20 hover:bg-white/30 rounded-lg"><Edit2 className="w-4 h-4" /></button>
-              <button onClick={() => deleteCruise(cruise.id)} className="p-2 bg-white/20 hover:bg-red-500 rounded-lg"><Trash2 className="w-4 h-4" /></button>
+  if (loading) return (
+    <div style={s.center}>
+      <Ship size={32} style={{ color:"#185FA5" }} />
+      <p style={{ color:"#5F5E5A", marginTop:10, fontSize:14 }}>Loading…</p>
+    </div>
+  );
+
+  return (
+    <div style={s.app}>
+      {/* ── Nav ── */}
+      <header style={s.header}>
+        <div style={s.headerInner}>
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            <div style={s.logo}><Ship size={18} /></div>
+            <div>
+              <h1 style={s.appName}>CruiseWatch</h1>
+              <p style={s.appSub}>Royal Caribbean price tracker</p>
             </div>
           </div>
-          {daysUntil >= 0 && (
-            <div className="bg-yellow-400 text-gray-900 rounded-lg px-4 py-2 inline-block font-semibold">
-              {daysUntil === 0 ? '🎉 Departing Today!' : `⏰ ${daysUntil} days until departure`}
+          <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+            <button onClick={exportData} style={s.iconBtn} title="Export data">
+              <Download size={15} />
+            </button>
+            <label style={s.iconBtn} title="Import data">
+              <Upload size={15} />
+              <input type="file" accept=".json" onChange={importData} style={{ display:"none" }} />
+            </label>
+            <button onClick={() => { setEditing(newCruise()); setShowForm(true); }} style={s.addBtn}>
+              <Plus size={15} /> Add cruise
+            </button>
+          </div>
+        </div>
+        {/* Stats bar */}
+        <div style={s.statsBar}>
+          <StatChip label="Watching" value={cruises.length} icon={<Eye size={13} />} />
+          <StatChip label="Auto-tracked" value={trackedCount} icon={<Zap size={13} />} color="#0F6E56" />
+          <StatChip label="Price alerts" value={totalAlerts} icon={<Bell size={13} />} color={totalAlerts > 0 ? "#854F0B" : undefined} />
+        </div>
+      </header>
+
+      <main style={s.main}>
+        {cruises.length === 0 ? (
+          <EmptyState onAdd={() => { setEditing(newCruise()); setShowForm(true); }} />
+        ) : (
+          <div style={s.cardList}>
+            {cruises.map(cruise => (
+              <CruiseCard
+                key={cruise.id}
+                cruise={cruise}
+                expanded={expanded === cruise.id}
+                scraped={getScrapedData(cruise)}
+                getCurrentPrice={getCurrentPrice}
+                getPriceChange={getPriceChange}
+                getPriceHistory={getPriceHistory}
+                hasAlert={hasAlert}
+                onToggle={() => setExpanded(expanded === cruise.id ? null : cruise.id)}
+                onEdit={() => { setEditing({ ...cruise }); setShowForm(true); }}
+                onDelete={() => deleteCruise(cruise.id)}
+                onSave={saveCruise}
+                onSimulateScrape={simulateScrape}
+              />
+            ))}
+          </div>
+        )}
+      </main>
+
+      {showForm && editing && (
+        <CruiseForm
+          initial={editing}
+          onSave={cruise => { saveCruise(cruise); setShowForm(false); setEditing(null); }}
+          onClose={() => { setShowForm(false); setEditing(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Cruise Card ───────────────────────────────────────────────────────────────
+function CruiseCard({ cruise, expanded, scraped, getCurrentPrice, getPriceChange, getPriceHistory, hasAlert, onToggle, onEdit, onDelete, onSave, onSimulateScrape }) {
+  const days = daysUntil(cruise.departureDate);
+  const isAutoTracked = !!scraped;
+  const anyAlert = STATEROOMS.some(t => hasAlert(cruise, t.id));
+  const [scrapeInput, setScrapeInput] = useState({ interior:"", oceanview:"", balcony:"", suite:"" });
+  const [showScrapePanel, setShowScrapePanel] = useState(false);
+
+  const runSimScrape = () => {
+    const prices = {};
+    Object.entries(scrapeInput).forEach(([k,v]) => {
+      const n = parseFloat(v);
+      if (!isNaN(n) && n > 0) prices[k] = n;
+    });
+    if (Object.keys(prices).length === 0) return;
+    onSimulateScrape(cruise.scraperId || cruise.id, prices);
+    setScrapeInput({ interior:"", oceanview:"", balcony:"", suite:"" });
+    setShowScrapePanel(false);
+  };
+
+  return (
+    <div style={{ ...s.card, borderColor: anyAlert ? "#EF9F27" : undefined, borderWidth: anyAlert ? 2 : 1 }}>
+      {/* Card header gradient */}
+      <div style={s.cardHdr}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:12 }}>
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", marginBottom:6 }}>
+              <h3 style={s.cruiseName}>{cruise.name || "Unnamed cruise"}</h3>
+              {isAutoTracked
+                ? <Badge color="#9FE1CB" text_color="#085041"><Zap size={10} /> Auto-tracked</Badge>
+                : <Badge color="rgba(255,255,255,0.2)" text_color="rgba(255,255,255,0.85)"><Clock size={10} /> Manual</Badge>
+              }
+              {anyAlert && <Badge color="#FAC775" text_color="#412402"><Bell size={10} /> Price alert!</Badge>}
+            </div>
+            <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+              {cruise.ship        && <MetaChip icon={<Ship size={11} />}     label={cruise.ship} />}
+              {cruise.destination && <MetaChip icon={<MapPin size={11} />}   label={cruise.destination} />}
+              {cruise.departureDate && <MetaChip icon={<Calendar size={11} />} label={new Date(cruise.departureDate + "T00:00:00").toLocaleDateString("en-SG", { day:"numeric", month:"short", year:"numeric" })} />}
+              {cruise.duration    && <MetaChip icon={<Anchor size={11} />}   label={`${cruise.duration} nights`} />}
+            </div>
+          </div>
+          <div style={{ display:"flex", gap:6, flexShrink:0 }}>
+            <button onClick={onEdit} style={s.hdrBtn} title="Edit"><Edit2 size={14} /></button>
+            <button onClick={onDelete} style={s.hdrBtn} title="Delete"><Trash2 size={14} /></button>
+          </div>
+        </div>
+        {days != null && days >= 0 && days <= 90 && (
+          <div style={s.countdown}>
+            {days === 0 ? "🎉 Departing today!" : days === 1 ? "⏰ 1 day until departure" : `⏰ ${days} days until departure`}
+          </div>
+        )}
+        {scraped?.lastScraped && (
+          <p style={{ fontSize:11, color:"rgba(255,255,255,0.6)", margin:"6px 0 0" }}>
+            Last scraped: {new Date(scraped.lastScraped).toLocaleString("en-SG", { dateStyle:"medium", timeStyle:"short" })}
+          </p>
+        )}
+      </div>
+
+      {/* Price grid */}
+      <div style={{ padding:"20px 20px 0" }}>
+        <div style={s.priceGrid}>
+          {STATEROOMS.map(type => {
+            const cur    = getCurrentPrice(cruise, type.id);
+            const change = getPriceChange(cruise, type.id);
+            const alert  = hasAlert(cruise, type.id);
+            return (
+              <PriceCell
+                key={type.id}
+                type={type}
+                price={cur}
+                change={change}
+                alert={alert}
+                isAutoTracked={isAutoTracked}
+                cruise={cruise}
+                onSave={onSave}
+              />
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Expand / collapse */}
+      <div style={{ padding:"12px 20px" }}>
+        <button onClick={onToggle} style={s.expandBtn}>
+          {expanded
+            ? <><ChevronUp size={14} /> Hide details</>
+            : <><ChevronDown size={14} /><BarChart3 size={14} /> History & alerts</>}
+        </button>
+      </div>
+
+      {/* Expanded panel */}
+      {expanded && (
+        <div style={{ padding:"0 20px 20px", borderTop:"0.5px solid #D3D1C7" }}>
+          {/* Scraper info */}
+          {cruise.royalCaribbeanUrl && (
+            <div style={s.infoBox}>
+              <Link2 size={13} style={{ color:"#185FA5", flexShrink:0 }} />
+              <a href={cruise.royalCaribbeanUrl} target="_blank" rel="noopener noreferrer" style={{ color:"#185FA5", fontSize:12, wordBreak:"break-all" }}>
+                {cruise.royalCaribbeanUrl.length > 80 ? cruise.royalCaribbeanUrl.slice(0, 80) + "…" : cruise.royalCaribbeanUrl}
+              </a>
             </div>
           )}
-        </div>
+          {cruise.scraperId && (
+            <div style={{ ...s.infoBox, background:"#EAF3DE", borderColor:"#C0DD97", marginTop:8 }}>
+              <Zap size={13} style={{ color:"#3B6D11", flexShrink:0 }} />
+              <span style={{ fontSize:12, color:"#3B6D11" }}>Scraper ID: <code style={{ fontFamily:"monospace", background:"rgba(0,0,0,0.06)", padding:"1px 5px", borderRadius:4 }}>{cruise.scraperId}</code></span>
+            </div>
+          )}
 
-        <div className="p-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            {stateroomTypes.map((type) => {
-              const currentPrice = cruise.currentPrices[type.id];
-              const priceChange = calculatePriceChange(cruise, type.id);
-              const hasAlert = checkPriceAlert(cruise, type.id);
-              return (
-                <div key={type.id} className={`p-4 rounded-lg border-2 ${hasAlert ? 'border-green-500 bg-green-50 ring-4 ring-green-200' : 'border-gray-200 bg-gray-50'}`}>
-                  <div className="flex justify-between items-start mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-3xl">{type.icon}</span>
-                      <div>
-                        <h4 className="font-bold text-gray-900">{type.name}</h4>
-                        {hasAlert && <div className="flex items-center gap-1 text-green-700 text-xs font-semibold"><Bell className="w-3 h-3" /><span>🎯 Price Alert!</span></div>}
-                      </div>
+          {/* Simulate new scrape */}
+          <div style={{ marginTop:16 }}>
+            <button onClick={() => setShowScrapePanel(p => !p)} style={{ ...s.expandBtn, borderColor:"#185FA5", color:"#185FA5", gap:6 }}>
+              <RefreshCw size={13} /> {showScrapePanel ? "Cancel update" : "Add today's prices (simulate scrape)"}
+            </button>
+            {showScrapePanel && (
+              <div style={{ marginTop:10, padding:14, background:"#E6F1FB", borderRadius:10, border:"0.5px solid #85B7EB" }}>
+                <p style={{ fontSize:12, color:"#0C447C", margin:"0 0 10px" }}>Enter today's prices — these will be recorded in the price history.</p>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10 }}>
+                  {STATEROOMS.map(t => (
+                    <div key={t.id}>
+                      <label style={{ fontSize:12, color:"#5F5E5A", display:"block", marginBottom:3 }}>{t.icon} {t.label}</label>
+                      <input
+                        type="number"
+                        placeholder="Price in USD"
+                        value={scrapeInput[t.id]}
+                        onChange={e => setScrapeInput(p => ({ ...p, [t.id]: e.target.value }))}
+                        style={s.input}
+                      />
                     </div>
-                    {priceChange && (
-                      <div className={`flex items-center gap-1 text-sm font-bold ${priceChange.change < 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {priceChange.change < 0 ? <TrendingDown className="w-4 h-4" /> : <TrendingUp className="w-4 h-4" />}
-                        <span>{priceChange.percentChange.toFixed(1)}%</span>
-                      </div>
-                    )}
+                  ))}
+                </div>
+                <button onClick={runSimScrape} style={s.primaryBtn}>
+                  <Save size={13} /> Record prices
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Alerts */}
+          <h4 style={s.sectionHead}><Bell size={13} style={{ color:"#BA7517" }} /> Price alerts</h4>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(210px,1fr))", gap:8 }}>
+            {STATEROOMS.map(type => {
+              const cur = getCurrentPrice(cruise, type.id);
+              const al = parseFloat(cruise.alerts?.[type.id]);
+              const hit = al && cur && cur <= al;
+              return (
+                <div key={type.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 12px", background: hit ? "#E1F5EE" : "#F1EFE8", borderRadius:8, border:`0.5px solid ${hit ? "#5DCAA5" : "#D3D1C7"}` }}>
+                  <span style={{ fontSize:13, minWidth:95, color:"#444441" }}>{type.icon} {type.label}</span>
+                  <div style={{ flex:1, display:"flex", alignItems:"center", gap:4 }}>
+                    <span style={{ fontSize:12, color:"#888780" }}>$</span>
+                    <input
+                      type="number"
+                      value={cruise.alerts?.[type.id] || ""}
+                      onChange={e => onSave({ ...cruise, alerts: { ...cruise.alerts, [type.id]: e.target.value } })}
+                      placeholder="Set target"
+                      style={{ ...s.input, fontSize:12, padding:"4px 8px" }}
+                    />
                   </div>
-                  <div className="flex items-baseline gap-2 mb-3">
-                    <span className="text-3xl font-bold text-blue-600">{currentPrice ? `$${parseFloat(currentPrice).toLocaleString()}` : '—'}</span>
-                    {priceChange && (
-                      <span className={`text-sm font-semibold ${priceChange.change < 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        ({priceChange.change > 0 ? '+' : ''}${priceChange.change.toFixed(0)})
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    <input type="number" placeholder="Override price"
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
-                      onKeyDown={(e) => { if (e.key === 'Enter' && e.target.value) { updatePrice(cruise, type.id, e.target.value); e.target.value = ''; } }} />
-                    <button onClick={(e) => { const input = e.target.closest('div').querySelector('input'); if (input.value) { updatePrice(cruise, type.id, input.value); input.value = ''; } }}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold">Update</button>
-                  </div>
+                  {hit && <CheckCircle size={14} style={{ color:"#0F6E56", flexShrink:0 }} />}
                 </div>
               );
             })}
           </div>
 
-          <button onClick={() => setExpandedCruise(isExpanded ? null : cruise.id)}
-            className="w-full py-3 text-sm text-blue-600 hover:bg-blue-50 rounded-lg font-semibold flex items-center justify-center gap-2">
-            {isExpanded ? <><ChevronUp className="w-4 h-4" />Hide Details</> : <><ChevronDown className="w-4 h-4" /><BarChart3 className="w-4 h-4" />Show Price History & Alerts</>}
-          </button>
-
-          {isExpanded && (
-            <div className="mt-4 pt-4 border-t border-gray-200 space-y-6">
-              {cruise.royalCaribbeanUrl && (
-                <div className="p-3 bg-blue-50 rounded-lg flex items-center gap-2 text-sm">
-                  <Link className="w-4 h-4 text-blue-500 shrink-0" />
-                  <a href={cruise.royalCaribbeanUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline truncate">{cruise.royalCaribbeanUrl}</a>
-                </div>
-              )}
-              <div>
-                <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-lg"><Bell className="w-5 h-5 text-yellow-500" />Price Alerts</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {stateroomTypes.map((type) => (
-                    <div key={type.id} className="flex items-center gap-2">
-                      <span className="text-sm font-semibold text-gray-700 w-28">{type.icon} {type.name}:</span>
-                      <div className="flex-1 flex items-center gap-2">
-                        <DollarSign className="w-4 h-4 text-gray-400" />
-                        <input type="number" value={cruise.alerts[type.id] || ''}
-                          onChange={(e) => saveCruise({ ...cruise, alerts: { ...cruise.alerts, [type.id]: e.target.value } })}
-                          placeholder="Alert price"
-                          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2 text-lg"><RefreshCw className="w-5 h-5 text-blue-500" />Price History</h4>
-                {cruise.priceHistory?.length > 0 ? (
-                  <div className="space-y-2 max-h-80 overflow-y-auto">
-                    {[...cruise.priceHistory].reverse().map((entry, idx) => (
-                      <div key={idx} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg text-sm">
-                        <div className="flex items-center gap-3">
-                          <span className="text-gray-500">{new Date(entry.date).toLocaleDateString()}</span>
-                          <span className="font-bold text-gray-800">{stateroomTypes.find(t => t.id === entry.stateroomType)?.icon}{' '}{stateroomTypes.find(t => t.id === entry.stateroomType)?.name}</span>
-                          {entry.source === 'auto' && <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">auto</span>}
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <span className="font-bold text-blue-600 text-lg">${entry.price.toLocaleString()}</span>
-                          {entry.change !== 0 && (
-                            <span className={`flex items-center gap-1 font-semibold ${entry.change < 0 ? 'text-green-600' : 'text-red-600'}`}>
-                              {entry.change < 0 ? <TrendingDown className="w-4 h-4" /> : <TrendingUp className="w-4 h-4" />}
-                              {entry.change > 0 ? '+' : ''}${entry.change.toFixed(0)}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center p-6 bg-gray-50 rounded-lg">
-                    <BarChart3 className="w-12 h-12 text-gray-300 mx-auto mb-2" />
-                    <p className="text-gray-500 text-sm italic">No price history yet.</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
+          {/* History */}
+          <h4 style={s.sectionHead}><BarChart3 size={13} style={{ color:"#185FA5" }} /> Price history</h4>
+          <PriceHistoryTable cruise={cruise} getPriceHistory={getPriceHistory} />
         </div>
-      </div>
-    );
+      )}
+    </div>
+  );
+}
+
+// ── Price Cell ────────────────────────────────────────────────────────────────
+function PriceCell({ type, price, change, alert, isAutoTracked, cruise, onSave }) {
+  const [val, setVal] = useState("");
+  const commit = () => {
+    const p = parseFloat(val);
+    if (!val || isNaN(p) || p < 0) return;
+    const old = parseFloat(cruise.currentPrices?.[type.id]) || 0;
+    onSave({
+      ...cruise,
+      currentPrices: { ...cruise.currentPrices, [type.id]: val },
+      priceHistory: [...(cruise.priceHistory || []), {
+        date: new Date().toISOString(), stateroomType: type.id,
+        price: p, change: old ? p - old : 0, source: "manual"
+      }],
+    });
+    setVal("");
   };
-
-  const AddEditForm = () => {
-    const [formData, setFormData] = useState(editingCruise || {});
-    const [urlLoading, setUrlLoading] = useState(false);
-    const [urlStatus, setUrlStatus] = useState('');
-
-    const parseCheckoutUrl = (rawUrl) => {
-      const SHIP_NAMES = {
-        AD:'Adventure of the Seas',AL:'Allure of the Seas',AN:'Anthem of the Seas',
-        BR:'Brilliance of the Seas',EN:'Enchantment of the Seas',EX:'Explorer of the Seas',
-        FR:'Freedom of the Seas',GR:'Grandeur of the Seas',HM:'Harmony of the Seas',
-        IC:'Icon of the Seas',ID:'Independence of the Seas',JW:'Jewel of the Seas',
-        LB:'Liberty of the Seas',MA:'Mariner of the Seas',NV:'Navigator of the Seas',
-        OA:'Oasis of the Seas',OY:'Odyssey of the Seas',OV:'Ovation of the Seas',
-        QN:'Quantum of the Seas',RD:'Radiance of the Seas',RH:'Rhapsody of the Seas',
-        SC:'Spectrum of the Seas',SR:'Serenade of the Seas',ST:'Star of the Seas',
-        SY:'Symphony of the Seas',UT:'Utopia of the Seas',VI:'Vision of the Seas',
-        VY:'Voyager of the Seas',WN:'Wonder of the Seas',
-      };
-      const CABIN_MAP = {
-        INTERIOR: 'interior', OCEANVIEW: 'oceanview', BALCONY: 'balcony', SUITE: 'suite',
-        INSIDE: 'interior', OUTSIDE: 'oceanview', JUNIOR_SUITE: 'suite',
-};
-      try {
-        const u = new URL(rawUrl);
-        const p = u.searchParams;
-        const shipCode = (p.get('shipCode') || '').toUpperCase();
-        const sailDate = p.get('sailDate') || '';
-        const cabinRaw = (p.get('r0d') || p.get('cabinClassType') || '').toUpperCase().trim();
-        const adults = parseInt(p.get('r0a') || '2');
-        const stateroomType = CABIN_MAP[cabinRaw] || null;
-        const ship = SHIP_NAMES[shipCode] || shipCode || null;
-        const totalPrice = p.get('r0A') ? parseFloat(p.get('r0A')) : null;
-        let departureDate = sailDate;
-        let friendlyDate = '';
-        if (sailDate) {
-          const d = new Date(sailDate);
-          if (!isNaN(d)) {
-            departureDate = d.toISOString().split('T')[0];
-            friendlyDate = d.toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
-          }
-        }
-        let duration = null;
-        const pkgMatch = (p.get('packageCode') || '').match(/[A-Z]{2}(\d+)[A-Z]/);
-        if (pkgMatch) duration = pkgMatch[1];
-        const r0fMatch = (p.get('r0f') || '').match(/^(\d+)N$/i);
-        if (!duration && r0fMatch) duration = r0fMatch[1];
-        const name = ship && friendlyDate ? `${ship} — ${friendlyDate}` : null;
-        const prices = {};
-        if (totalPrice && stateroomType) prices[stateroomType] = totalPrice;
-        return { name, ship, departureDate, duration, stateroomType, totalPrice, adults, prices };
-      } catch { return null; }
-    };
-
-    const fetchFromUrl = async (url) => {
-      if (!url || !url.includes('royalcaribbean.com')) return;
-      setUrlLoading(true);
-      setUrlStatus('');
-      const isCheckoutUrl = url.includes('/checkout/');
-      try {
-        if (isCheckoutUrl) {
-          const parsed = parseCheckoutUrl(url);
-          if (parsed && (parsed.ship || parsed.totalPrice)) {
-            setFormData(prev => ({
-              ...prev,
-              royalCaribbeanUrl: url,
-              name: parsed.name || prev.name,
-              ship: parsed.ship || prev.ship,
-              departureDate: parsed.departureDate || prev.departureDate,
-              duration: parsed.duration || prev.duration,
-              currentPrices: {
-                interior: parsed.prices?.interior?.toString() || prev.currentPrices?.interior || '',
-                oceanview: parsed.prices?.oceanview?.toString() || prev.currentPrices?.oceanview || '',
-                balcony: parsed.prices?.balcony?.toString() || prev.currentPrices?.balcony || '',
-                suite: parsed.prices?.suite?.toString() || prev.currentPrices?.suite || '',
-              },
-            }));
-            setUrlStatus(parsed.totalPrice ? 'success' : 'partial_no_price');
-            setUrlLoading(false);
-            return;
-          }
-        }
-        if (BACKEND_URL) {
-          const res = await fetch(`${BACKEND_URL}/api/scrape-url`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
-          const result = await res.json();
-          if (result.needsCheckoutUrl) {
-            setFormData(prev => ({ ...prev, royalCaribbeanUrl: url }));
-            setUrlStatus('needs_checkout');
-          } else if (result.success && result.data) {
-            const d = result.data;
-            setFormData(prev => ({ ...prev, royalCaribbeanUrl: url, name: d.name || prev.name, ship: d.ship || prev.ship, departureDate: d.departureDate || prev.departureDate, duration: d.duration || prev.duration, currentPrices: { interior: d.prices?.interior?.toString() || prev.currentPrices?.interior || '', oceanview: d.prices?.oceanview?.toString() || prev.currentPrices?.oceanview || '', balcony: d.prices?.balcony?.toString() || prev.currentPrices?.balcony || '', suite: d.prices?.suite?.toString() || prev.currentPrices?.suite || '' } }));
-            setUrlStatus('success');
-          } else { setUrlStatus('needs_checkout'); }
-        } else {
-          setFormData(prev => ({ ...prev, royalCaribbeanUrl: url }));
-          setUrlStatus(isCheckoutUrl ? 'saved' : 'needs_checkout');
-        }
-      } catch { setUrlStatus('error'); }
-      setUrlLoading(false);
-    };
-
-    const handleSubmit = (e) => {
-      e.preventDefault();
-      saveCruise(formData);
-      setShowAddForm(false);
-      setEditingCruise(null);
-    };
-
-    const statusMessages = {
-      success: { color: 'text-green-600', msg: '✅ Ship, date & price auto-filled from URL!' },
-      partial_no_price: { color: 'text-amber-600', msg: '✅ Ship & date filled. Price not found in URL — enter manually or use a checkout URL for auto-pricing.' },
-      needs_checkout: { color: 'text-amber-600', msg: '⚠️ For auto-fill to work, use a checkout URL. Go to royalcaribbean.com → select cruise → pick cabin → proceed to guest info page → copy that URL.' },
-      saved: { color: 'text-blue-600', msg: 'ℹ️ URL saved. GitHub Actions will auto-track prices on next run. Fill in details manually for now.' },
-      error: { color: 'text-red-600', msg: '❌ Something went wrong. Fill in details manually.' },
-    };
-
-    return (
-      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-        <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
-          <div className="sticky top-0 bg-gradient-to-r from-blue-600 to-indigo-700 p-6 flex justify-between items-center z-10">
-            <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-              <Ship className="w-7 h-7" />{formData.name ? 'Edit Cruise' : 'Add New Cruise'}
-            </h2>
-            <button onClick={() => { setShowAddForm(false); setEditingCruise(null); }} className="text-white hover:bg-white/20 rounded-lg p-2"><X className="w-6 h-6" /></button>
-          </div>
-
-          <form onSubmit={handleSubmit} className="p-6 space-y-5">
-            <div className="bg-blue-50 border-2 border-blue-200 rounded-xl p-4">
-              <label className="block text-sm font-bold text-blue-800 mb-2 flex items-center gap-2">
-                <Link className="w-4 h-4" />Paste Royal Caribbean Checkout URL to Auto-Fill
-              </label>
-              <div className="flex gap-2">
-                <input type="url" value={formData.royalCaribbeanUrl || ''}
-                  onChange={(e) => setFormData({ ...formData, royalCaribbeanUrl: e.target.value })}
-                  onBlur={(e) => fetchFromUrl(e.target.value)}
-                  placeholder="https://www.royalcaribbean.com/checkout/guest-info?..."
-                  className="flex-1 px-4 py-3 border-2 border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm" />
-                <button type="button" onClick={() => fetchFromUrl(formData.royalCaribbeanUrl)} disabled={urlLoading}
-                  className="px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold flex items-center gap-2 disabled:opacity-50">
-                  {urlLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                  {urlLoading ? 'Fetching...' : 'Fetch'}
-                </button>
-              </div>
-              {urlStatus && <p className={`mt-2 text-sm font-medium ${statusMessages[urlStatus]?.color}`}>{statusMessages[urlStatus]?.msg}</p>}
-              {!urlStatus && (
-                <div className="mt-2 text-xs text-blue-600 space-y-1">
-                  <p className="font-semibold">💡 How to get the right URL:</p>
-                  <ol className="list-decimal list-inside space-y-0.5 text-blue-500">
-                    <li>Open royalcaribbean.com in <strong>incognito</strong> mode (logged out)</li>
-                    <li>Search your cruise, pick cabin type, proceed to <strong>Guest Info</strong> page</li>
-                    <li>Copy the full URL — starts with <code className="bg-blue-100 px-1 rounded">/checkout/guest-info?</code></li>
-                    <li>Paste here — ship, date & price fill instantly!</li>
-                  </ol>
-                </div>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-bold text-gray-800 mb-2">Cruise Name *</label>
-              <input type="text" required value={formData.name || ''} onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder="e.g., Caribbean Adventure 2026" className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-bold text-gray-800 mb-2">Ship Name *</label>
-                <input type="text" required value={formData.ship || ''} onChange={(e) => setFormData({ ...formData, ship: e.target.value })}
-                  placeholder="e.g., Harmony of the Seas" className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-gray-800 mb-2">Departure Date *</label>
-                <input type="date" required value={formData.departureDate || ''} onChange={(e) => setFormData({ ...formData, departureDate: e.target.value })}
-                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-bold text-gray-800 mb-2">Duration (nights) *</label>
-                <input type="number" required min="1" value={formData.duration || ''} onChange={(e) => setFormData({ ...formData, duration: e.target.value })}
-                  placeholder="7" className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-gray-800 mb-2">Destination *</label>
-                <input type="text" required value={formData.destination || ''} onChange={(e) => setFormData({ ...formData, destination: e.target.value })}
-                  placeholder="e.g., Eastern Caribbean" className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-bold text-gray-800 mb-3">Prices <span className="font-normal text-gray-500">(auto-filled from URL — or enter manually)</span></label>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {stateroomTypes.map((type) => (
-                  <div key={type.id} className="border-2 border-gray-200 rounded-lg p-3">
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">{type.icon} {type.name}</label>
-                    <input type="number" min="0" value={formData.currentPrices?.[type.id] || ''}
-                      onChange={(e) => setFormData({ ...formData, currentPrices: { ...formData.currentPrices, [type.id]: e.target.value } })}
-                      placeholder="Price" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex gap-3 pt-4">
-              <button type="submit" className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-lg flex items-center justify-center gap-2 shadow-lg">
-                <Save className="w-5 h-5" />{formData.name ? 'Save Changes' : 'Add Cruise'}
-              </button>
-              <button type="button" onClick={() => { setShowAddForm(false); setEditingCruise(null); }} className="px-8 bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-4 rounded-lg">Cancel</button>
-            </div>
-          </form>
-        </div>
-      </div>
-    );
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 flex items-center justify-center">
-        <div className="text-center">
-          <Ship className="w-20 h-20 text-blue-600 animate-bounce mx-auto mb-4" />
-          <p className="text-gray-700 text-lg font-semibold">Loading your cruises...</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 p-4 md:p-6">
-      <div className="max-w-7xl mx-auto">
-        <div className="bg-white rounded-2xl shadow-2xl p-6 md:p-8 mb-6">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <div>
-              <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2 flex items-center gap-3">
-                <Ship className="w-10 h-10 text-blue-600" />Royal Caribbean Price Tracker
-              </h1>
-              <p className="text-gray-600">Track stateroom prices and get alerts when prices drop 📉</p>
-              {lastAutoUpdate && (
-                <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
-                  <RefreshCw className="w-3 h-3" />Prices auto-updated: {lastAutoUpdate.toLocaleString()}
-                </p>
-              )}
-            </div>
-            <div className="flex gap-3 flex-wrap">
-              <label className="bg-gray-100 hover:bg-gray-200 text-gray-800 font-semibold px-4 py-3 rounded-lg cursor-pointer flex items-center gap-2 shadow">
-                <Upload className="w-5 h-5" />Import<input type="file" accept=".json" onChange={importData} className="hidden" />
-              </label>
-              <button onClick={exportData} disabled={cruises.length === 0} className="bg-gray-100 hover:bg-gray-200 text-gray-800 font-semibold px-4 py-3 rounded-lg flex items-center gap-2 shadow disabled:opacity-50">
-                <Download className="w-5 h-5" />Export
-              </button>
-              <button onClick={addNewCruise} className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold px-6 py-3 rounded-lg flex items-center gap-2 shadow-lg">
-                <Plus className="w-5 h-5" />Add Cruise
-              </button>
-            </div>
+    <div style={{
+      padding:14, borderRadius:10,
+      border: `${alert ? 2 : 1}px solid ${alert ? "#1D9E75" : "#D3D1C7"}`,
+      background: alert ? "#E1F5EE" : "#FAFAF8",
+    }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
+        <div>
+          <span style={{ fontSize:18 }}>{type.icon}</span>
+          <span style={{ fontWeight:500, fontSize:12, marginLeft:5, color:"#444441" }}>{type.label}</span>
+          {alert && <div style={{ fontSize:10, color:"#085041", marginTop:2 }}>🔔 Alert hit!</div>}
+        </div>
+        {change && (
+          <span style={{ fontSize:12, fontWeight:500, color: change.change < 0 ? "#0F6E56" : "#993C1D", display:"flex", alignItems:"center", gap:2 }}>
+            {change.change < 0 ? <TrendingDown size={12} /> : <TrendingUp size={12} />}
+            {Math.abs(change.pct).toFixed(1)}%
+          </span>
+        )}
+      </div>
+      <div style={{ marginBottom: isAutoTracked ? 0 : 6 }}>
+        <span style={{ fontSize:22, fontWeight:600, color: type.color }}>{fmt(price)}</span>
+        {change && (
+          <span style={{ fontSize:11, color: change.change < 0 ? "#0F6E56" : "#993C1D", marginLeft:6 }}>
+            ({change.change > 0 ? "+" : ""}{fmt(change.change)})
+          </span>
+        )}
+      </div>
+      {!isAutoTracked && (
+        <div style={{ display:"flex", gap:5, marginTop:4 }}>
+          <input
+            type="number"
+            value={val}
+            onChange={e => setVal(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && commit()}
+            placeholder="Manual price"
+            style={{ ...s.input, fontSize:11, padding:"4px 7px", flex:1 }}
+          />
+          <button onClick={commit} style={{ padding:"4px 10px", background:"#185FA5", color:"#fff", border:"none", borderRadius:6, cursor:"pointer", fontSize:11 }}>Set</button>
+        </div>
+      )}
+      {isAutoTracked && (
+        <p style={{ fontSize:10, color:"#888780", margin:0 }}>Auto-updated</p>
+      )}
+    </div>
+  );
+}
+
+// ── Price History Table ───────────────────────────────────────────────────────
+function PriceHistoryTable({ cruise, getPriceHistory }) {
+  const all = STATEROOMS.flatMap(t =>
+    getPriceHistory(cruise, t.id).map(h => ({ ...h, typeInfo: t }))
+  ).sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 50);
+
+  if (!all.length) return (
+    <div style={{ textAlign:"center", padding:"18px", background:"#F1EFE8", borderRadius:8, color:"#888780", fontSize:13 }}>
+      No history yet. Prices are recorded after each daily scrape or manual entry.
+    </div>
+  );
+
+  return (
+    <div style={{ maxHeight:300, overflowY:"auto", borderRadius:8, border:"0.5px solid #D3D1C7", overflow:"hidden" }}>
+      <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+        <thead>
+          <tr style={{ background:"#F1EFE8" }}>
+            <th style={s.th}>Date</th>
+            <th style={s.th}>Category</th>
+            <th style={s.th}>Price</th>
+            <th style={s.th}>Change</th>
+            <th style={s.th}>Source</th>
+          </tr>
+        </thead>
+        <tbody>
+          {all.map((entry, idx) => (
+            <tr key={idx} style={{ background: idx % 2 === 0 ? "#fff" : "#FAFAF8", borderTop:"0.5px solid #D3D1C7" }}>
+              <td style={s.td}>{new Date(entry.date).toLocaleDateString("en-SG", { day:"numeric", month:"short", year:"numeric" })}</td>
+              <td style={s.td}>{entry.typeInfo.icon} {entry.typeInfo.label}</td>
+              <td style={{ ...s.td, fontWeight:500, color: entry.typeInfo.color }}>{fmt(entry.price)}</td>
+              <td style={{ ...s.td, color: entry.change < 0 ? "#0F6E56" : entry.change > 0 ? "#993C1D" : "#888780" }}>
+                {entry.change > 0 ? "+" : ""}{entry.change !== 0 ? fmt(entry.change) : "—"}
+              </td>
+              <td style={s.td}>
+                <span style={{ fontSize:10, background: entry.source === "auto" ? "#C0DD97" : "#D3D1C7", color: entry.source === "auto" ? "#27500A" : "#444441", padding:"2px 6px", borderRadius:20 }}>
+                  {entry.source}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── Add/Edit Form ─────────────────────────────────────────────────────────────
+function CruiseForm({ initial, onSave, onClose }) {
+  const [form, setForm] = useState(initial);
+  const [urlStatus, setUrlStatus] = useState("");
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const setPrice = (k, v) => setForm(f => ({ ...f, currentPrices: { ...f.currentPrices, [k]: v } }));
+
+  const parseUrl = (url) => {
+    if (!url || !url.includes("royalcaribbean.com")) return;
+    const parsed = parseRCUrl(url);
+    if (!parsed) { setUrlStatus("error"); return; }
+    setForm(f => ({
+      ...f,
+      royalCaribbeanUrl: url,
+      name: parsed.name || f.name,
+      ship: parsed.ship || f.ship,
+      departureDate: parsed.departureDate || f.departureDate,
+      duration: parsed.duration || f.duration,
+      currentPrices: {
+        ...(f.currentPrices || {}),
+        ...(parsed.stateroomType && parsed.urlPrice ? { [parsed.stateroomType]: String(parsed.urlPrice) } : {}),
+      },
+    }));
+    setUrlStatus(parsed.urlPrice ? "success" : "partial");
+  };
+
+  const handleSave = () => {
+    if (!form.name || !form.departureDate) {
+      alert("Please fill in at least the cruise name and departure date.");
+      return;
+    }
+    onSave(form);
+  };
+
+  return (
+    <div style={s.overlay}>
+      <div style={s.modal}>
+        <div style={s.modalHdr}>
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <Ship size={17} />
+            <h2 style={{ color:"#fff", fontWeight:500, fontSize:17, margin:0 }}>
+              {form.name ? "Edit cruise" : "Add cruise to watchlist"}
+            </h2>
           </div>
+          <button onClick={onClose} style={{ background:"rgba(255,255,255,0.2)", border:"none", borderRadius:6, padding:"6px 9px", cursor:"pointer", color:"#fff" }}><X size={14} /></button>
         </div>
 
-        {cruises.length === 0 ? (
-          <div className="bg-white rounded-2xl shadow-xl p-12 text-center">
-            <Ship className="w-20 h-20 text-gray-300 mx-auto mb-4" />
-            <h3 className="text-2xl font-bold text-gray-800 mb-2">No cruises tracked yet</h3>
-            <p className="text-gray-600 mb-6">Paste a Royal Caribbean checkout URL to auto-fill, or add details manually!</p>
-            <button onClick={addNewCruise} className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold px-8 py-4 rounded-lg inline-flex items-center gap-2 shadow-lg">
-              <Plus className="w-5 h-5" />Add Your First Cruise
-            </button>
-          </div>
-        ) : (
-          <div className="space-y-6">{cruises.map((cruise) => <CruiseCard key={cruise.id} cruise={cruise} />)}</div>
-        )}
+        <div style={{ padding:20, overflowY:"auto", flex:1 }}>
+          {/* URL auto-fill */}
+          <div style={{ background:"#E6F1FB", border:"0.5px solid #85B7EB", borderRadius:10, padding:14, marginBottom:18 }}>
+            <label style={{ fontSize:13, fontWeight:500, color:"#0C447C", display:"flex", alignItems:"center", gap:6, marginBottom:8 }}>
+              <Link2 size={13} /> Paste Royal Caribbean checkout URL (auto-fills details)
+            </label>
+            <input
+              type="url"
+              value={form.royalCaribbeanUrl || ""}
+              onChange={e => set("royalCaribbeanUrl", e.target.value)}
+              onBlur={e => parseUrl(e.target.value)}
+              placeholder="https://www.royalcaribbean.com/checkout/guest-info?sailDate=…"
+              style={{ ...s.input, width:"100%", boxSizing:"border-box" }}
+            />
+            {urlStatus === "success" && <p style={{ margin:"5px 0 0", fontSize:12, color:"#085041" }}>✅ Ship, date & price filled from URL!</p>}
+            {urlStatus === "partial" && <p style={{ margin:"5px 0 0", fontSize:12, color:"#BA7517" }}>✅ Ship & date filled — enter price manually below.</p>}
+            {urlStatus === "error"   && <p style={{ margin:"5px 0 0", fontSize:12, color:"#993C1D" }}>❌ Could not parse URL. Fill in details manually.</p>}
+            {!urlStatus && <p style={{ margin:"5px 0 0", fontSize:12, color:"#185FA5" }}>💡 Go to royalcaribbean.com → pick cabin → reach guest info page → copy URL here.</p>}
 
-        {showAddForm && <AddEditForm />}
+            <div style={{ marginTop:12 }}>
+              <label style={{ fontSize:12, fontWeight:500, color:"#0C447C", display:"block", marginBottom:5 }}>
+                Scraper ID <span style={{ fontWeight:400, color:"#378ADD" }}>(optional — links to GitHub Actions scraper)</span>
+              </label>
+              <input
+                type="text"
+                value={form.scraperId || ""}
+                onChange={e => set("scraperId", e.target.value)}
+                placeholder="e.g. harmony-dec-2026 (must match id in CRUISE_URLS secret)"
+                style={{ ...s.input, width:"100%", boxSizing:"border-box" }}
+              />
+            </div>
+          </div>
+
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 }}>
+            <FormField label="Cruise name *">
+              <input value={form.name || ""} onChange={e => set("name", e.target.value)} placeholder="Caribbean Adventure 2026" style={{ ...s.input, width:"100%", boxSizing:"border-box" }} />
+            </FormField>
+            <FormField label="Ship">
+              <input value={form.ship || ""} onChange={e => set("ship", e.target.value)} placeholder="Harmony of the Seas" style={{ ...s.input, width:"100%", boxSizing:"border-box" }} />
+            </FormField>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12, marginBottom:14 }}>
+            <FormField label="Departure date *">
+              <input type="date" value={form.departureDate || ""} onChange={e => set("departureDate", e.target.value)} style={{ ...s.input, width:"100%", boxSizing:"border-box" }} />
+            </FormField>
+            <FormField label="Duration (nights)">
+              <input type="number" min="1" value={form.duration || ""} onChange={e => set("duration", e.target.value)} placeholder="7" style={{ ...s.input, width:"100%", boxSizing:"border-box" }} />
+            </FormField>
+            <FormField label="Destination">
+              <input value={form.destination || ""} onChange={e => set("destination", e.target.value)} placeholder="Eastern Caribbean" style={{ ...s.input, width:"100%", boxSizing:"border-box" }} />
+            </FormField>
+          </div>
+
+          <FormField label="Starting prices (optional)">
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+              {STATEROOMS.map(t => (
+                <div key={t.id} style={{ border:"0.5px solid #D3D1C7", borderRadius:8, padding:10 }}>
+                  <label style={{ fontSize:12, fontWeight:500, display:"block", marginBottom:5 }}>{t.icon} {t.label}</label>
+                  <input type="number" min="0" value={form.currentPrices?.[t.id] || ""} onChange={e => setPrice(t.id, e.target.value)} placeholder="Price USD" style={{ ...s.input, width:"100%", boxSizing:"border-box" }} />
+                </div>
+              ))}
+            </div>
+          </FormField>
+
+          <div style={{ display:"flex", gap:10, marginTop:18 }}>
+            <button onClick={handleSave} style={{ ...s.primaryBtn, flex:1, justifyContent:"center", padding:12, fontSize:14 }}>
+              <Save size={14} /> {form.name ? "Save changes" : "Add to watchlist"}
+            </button>
+            <button onClick={onClose} style={{ padding:"12px 20px", background:"#F1EFE8", border:"0.5px solid #B4B2A9", borderRadius:8, cursor:"pointer", fontSize:14 }}>Cancel</button>
+          </div>
+        </div>
       </div>
     </div>
   );
 }
+
+// ── Small components ──────────────────────────────────────────────────────────
+function Badge({ color, text_color, children }) {
+  return (
+    <span style={{ background: color, color: text_color, fontSize:11, fontWeight:500, padding:"3px 9px", borderRadius:20, display:"inline-flex", alignItems:"center", gap:4 }}>
+      {children}
+    </span>
+  );
+}
+function MetaChip({ icon, label }) {
+  return (
+    <span style={{ background:"rgba(255,255,255,0.18)", borderRadius:20, padding:"3px 9px", display:"inline-flex", alignItems:"center", gap:4, fontSize:12, color:"rgba(255,255,255,0.9)" }}>
+      {icon}{label}
+    </span>
+  );
+}
+function StatChip({ label, value, icon, color = "#185FA5" }) {
+  return (
+    <div style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 12px", background:"rgba(255,255,255,0.7)", borderRadius:20, border:"0.5px solid #D3D1C7" }}>
+      <span style={{ color, display:"flex" }}>{icon}</span>
+      <span style={{ fontSize:13, fontWeight:600, color }}>{value}</span>
+      <span style={{ fontSize:12, color:"#5F5E5A" }}>{label}</span>
+    </div>
+  );
+}
+function FormField({ label, children }) {
+  return (
+    <div style={{ marginBottom:12 }}>
+      <label style={{ display:"block", fontSize:12, fontWeight:500, marginBottom:5, color:"#444441" }}>{label}</label>
+      {children}
+    </div>
+  );
+}
+function EmptyState({ onAdd }) {
+  return (
+    <div style={{ textAlign:"center", padding:"60px 20px" }}>
+      <Ship size={48} style={{ color:"#B5D4F4", marginBottom:16 }} />
+      <h2 style={{ fontSize:22, fontWeight:500, color:"#2C2C2A", margin:"0 0 8px" }}>No cruises tracked yet</h2>
+      <p style={{ color:"#5F5E5A", fontSize:14, margin:"0 0 24px" }}>Add a Royal Caribbean cruise to start monitoring prices daily.</p>
+      <button onClick={onAdd} style={s.primaryBtn}>
+        <Plus size={15} /> Add your first cruise
+      </button>
+    </div>
+  );
+}
+
+// ── Styles ────────────────────────────────────────────────────────────────────
+const s = {
+  app:        { minHeight:"100vh", background:"linear-gradient(160deg,#EBF5FF 0%,#F0EEFF 100%)", fontFamily:"system-ui,-apple-system,sans-serif" },
+  center:     { minHeight:"100vh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center" },
+  header:     { background:"#fff", borderBottom:"0.5px solid #D3D1C7", position:"sticky", top:0, zIndex:10 },
+  headerInner:{ maxWidth:980, margin:"0 auto", padding:"14px 20px", display:"flex", justifyContent:"space-between", alignItems:"center" },
+  logo:       { width:36, height:36, borderRadius:10, background:"linear-gradient(135deg,#185FA5,#534AB7)", display:"flex", alignItems:"center", justifyContent:"center", color:"#fff" },
+  appName:    { fontSize:18, fontWeight:600, margin:0, color:"#0C447C" },
+  appSub:     { fontSize:11, color:"#888780", margin:0 },
+  statsBar:   { maxWidth:980, margin:"0 auto", padding:"8px 20px 10px", display:"flex", gap:8, flexWrap:"wrap" },
+  main:       { maxWidth:980, margin:"0 auto", padding:"20px" },
+  cardList:   { display:"flex", flexDirection:"column", gap:16 },
+  card:       { background:"#fff", borderRadius:14, border:"1px solid #D3D1C7", overflow:"hidden" },
+  cardHdr:    { background:"linear-gradient(135deg,#185FA5,#534AB7)", padding:"18px 20px", color:"#fff" },
+  cruiseName: { fontWeight:600, fontSize:18, margin:0, color:"#fff" },
+  countdown:  { marginTop:10, display:"inline-block", background:"rgba(255,255,255,0.2)", color:"#fff", borderRadius:8, padding:"5px 12px", fontSize:12, fontWeight:500 },
+  hdrBtn:     { padding:"6px 9px", background:"rgba(255,255,255,0.18)", border:"none", borderRadius:7, cursor:"pointer", color:"#fff" },
+  iconBtn:    { padding:"7px 11px", background:"#F1EFE8", border:"0.5px solid #D3D1C7", borderRadius:8, cursor:"pointer", color:"#444441", display:"inline-flex", alignItems:"center" },
+  addBtn:     { padding:"8px 16px", background:"#185FA5", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:500, display:"inline-flex", alignItems:"center", gap:6 },
+  primaryBtn: { padding:"8px 16px", background:"#185FA5", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontSize:13, fontWeight:500, display:"inline-flex", alignItems:"center", gap:6 },
+  priceGrid:  { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:10, marginBottom:0 },
+  expandBtn:  { width:"100%", padding:9, background:"none", border:"0.5px solid #D3D1C7", borderRadius:8, cursor:"pointer", color:"#185FA5", fontSize:12, fontWeight:500, display:"flex", alignItems:"center", justifyContent:"center", gap:5 },
+  sectionHead:{ fontWeight:500, fontSize:14, margin:"18px 0 8px", display:"flex", alignItems:"center", gap:6, color:"#2C2C2A" },
+  infoBox:    { padding:"9px 12px", background:"#E6F1FB", border:"0.5px solid #B5D4F4", borderRadius:8, display:"flex", alignItems:"flex-start", gap:8, marginTop:14 },
+  input:      { padding:"7px 10px", border:"0.5px solid #B4B2A9", borderRadius:7, fontSize:13, background:"#fff", color:"#2C2C2A", outline:"none", width:"100%" },
+  overlay:    { position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", display:"flex", alignItems:"center", justifyContent:"center", padding:16, zIndex:50 },
+  modal:      { background:"#fff", borderRadius:14, width:"100%", maxWidth:640, maxHeight:"90vh", display:"flex", flexDirection:"column", overflow:"hidden" },
+  modalHdr:   { background:"linear-gradient(135deg,#185FA5,#534AB7)", padding:"16px 20px", display:"flex", justifyContent:"space-between", alignItems:"center" },
+  th:         { textAlign:"left", padding:"8px 10px", fontSize:11, fontWeight:600, color:"#5F5E5A", textTransform:"uppercase", letterSpacing:"0.04em" },
+  td:         { padding:"7px 10px", fontSize:12, color:"#2C2C2A" },
+};

@@ -1,0 +1,12 @@
+{
+  "name": "royal-caribbean-scraper",
+  "version": "2.0.0",
+  "description": "Daily price scraper for Royal Caribbean cruise tracker",
+  "main": "scrape.js",
+  "scripts": {
+    "scrape": "node scrape.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
