@@ -2,7 +2,7 @@
   "name": "cruise-price-tracker",
   "version": "2.0.0",
   "description": "Track Royal Caribbean cruise prices across stateroom categories with daily auto-scraping",
-  "homepage": "https://YOUR_GITHUB_USERNAME.github.io/cruise-price-tracker",
+  "homepage": "https://YOUR_GITHUB_USERNAME.github.io/Cruise-Price-Tracker",
   "private": true,
   "dependencies": {
     "react": "^18.2.0",
